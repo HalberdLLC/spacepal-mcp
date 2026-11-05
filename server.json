@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "com.getspacepal/spacepal",
+  "title": "Spacepal",
+  "description": "List, switch and rename macOS Spaces and move windows between them. Needs the Spacepal app.",
+  "version": "0.1.0",
+  "websiteUrl": "https://getspacepal.com/integrations/mcp/",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "spacepal-mcp",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}

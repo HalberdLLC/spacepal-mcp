@@ -1,0 +1,42 @@
+{
+  "name": "spacepal-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Spacepal: list, switch, rename macOS Spaces and move windows between them from Claude, Cursor or any MCP client.",
+  "mcpName": "com.getspacepal/spacepal",
+  "type": "module",
+  "bin": {
+    "spacepal-mcp": "index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE",
+    "server.json"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "macos",
+    "spaces",
+    "mission-control",
+    "spacepal",
+    "claude"
+  ],
+  "homepage": "https://getspacepal.com/integrations/mcp/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanKucukhas/spacepal-mcp.git"
+  },
+  "author": "Halberd LLC",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "zod": "^3.23.8"
+  }
+}
