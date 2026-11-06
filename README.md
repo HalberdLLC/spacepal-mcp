@@ -34,6 +34,8 @@ It runs locally over stdio. It reads the Space list Spacepal writes to
 | `restore_window_layout` | Put windows back from the last saved layout |
 | `save_sessions` | Save terminal sessions and Chrome windows on one Space or all of them |
 | `restore_sessions` | Reopen saved sessions on their Spaces |
+| `place_window` | Put the front window in a half, a quarter, maximized, centred, or on the next display |
+| `set_presentation_mode` | Hide Space names, notes and previews for a screen share, or show them again |
 | `add_desktop` | Add a desktop on the current display |
 | `remove_desktop` | Remove a desktop; its windows move to another one |
 

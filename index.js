@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -480,6 +480,49 @@ server.registerTool(
   guarded(async () => {
     await send("session-restore");
     return text("Asked Spacepal to reopen the saved sessions.");
+  }),
+);
+
+server.registerTool(
+  "place_window",
+  {
+    title: "Place window",
+    description:
+      "Resize and move the user's frontmost window on its current display: a half, a quarter, maximized or centred; " +
+      'or, with "next-display", move it to the next display. It stays on the same Space. ' +
+      "The frontmost window is the one the user last focused (from Claude Desktop that is Claude's own window). " +
+      "Needs the Accessibility permission Spacepal already asks for. Not undoable as one step; place it again to change it. " +
+      "Use move_window_to_space to send a window to another Space instead. Needs Spacepal 1.2.8 or later.",
+    inputSchema: {
+      position: z
+        .enum(["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right", "maximize", "center", "next-display"])
+        .describe('Where the window goes: a half ("left", "right", "top", "bottom"), a quarter ("top-left" etc.), "maximize", "center", or "next-display".'),
+    },
+    annotations: { title: "Place window", ...CHANGE, idempotentHint: true },
+  },
+  guarded(async ({ position }) => {
+    if (position === "next-display") await send("next-display");
+    else await send(`snap/${position}`);
+    return text(`Asked Spacepal to place the front window: ${position}.`);
+  }),
+);
+
+server.registerTool(
+  "set_presentation_mode",
+  {
+    title: "Set presentation mode",
+    description:
+      "Turn Spacepal's presentation mode on or off. While it is on, Spacepal shows \"Desktop N\" instead of Space names and hides notes, " +
+      "badges and window previews in its overview, menu bar and Mission Control, so a screen share shows nothing private. " +
+      "Names and notes are kept and come back when it is turned off; list_spaces still returns the real names. Reversible by calling it again. Needs Spacepal 1.2.8 or later.",
+    inputSchema: {
+      on: z.boolean().describe("true hides names, notes and previews; false shows them again."),
+    },
+    annotations: { title: "Set presentation mode", ...CHANGE, idempotentHint: true },
+  },
+  guarded(async ({ on }) => {
+    await send(`presentation/${on ? "on" : "off"}`);
+    return text(on ? "Presentation mode on: names, notes and previews hidden." : "Presentation mode off.");
   }),
 );
 
