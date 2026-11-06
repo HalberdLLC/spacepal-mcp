@@ -37,7 +37,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "scripts": {
     "test": "node test/smoke.mjs"
