@@ -13,13 +13,17 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
-const STATE_FILES = [
-  join(homedir(), "Library/Application Support/Spacepal/state.json"),
-  join(homedir(), "Library/Containers/com.halberd.spacepal/Data/Library/Application Support/Spacepal/state.json"),
+const SUPPORT_DIRS = [
+  join(homedir(), "Library/Application Support/Spacepal"),
+  join(homedir(), "Library/Containers/com.halberd.spacepal/Data/Library/Application Support/Spacepal"),
 ];
+const STATE_FILES = SUPPORT_DIRS.map((d) => join(d, "state.json"));
+const PROFILE_FILES = SUPPORT_DIRS.map((d) => join(d, "profiles.json"));
+// Built into the app (Profiles.swift, SpaceTemplate.all()).
+const TEMPLATES = ["Developer", "Designer", "Freelancer", "Student", "Streamer"];
 
 const NOT_RUNNING = "Spacepal is not running. Open Spacepal (getspacepal.com) and try again.";
 
@@ -32,16 +36,30 @@ async function isRunning() {
   }
 }
 
-async function readState() {
+async function newestFile(paths) {
   let newest = null;
-  for (const path of STATE_FILES) {
+  for (const path of paths) {
     try {
       const { mtimeMs } = await stat(path);
       if (!newest || mtimeMs > newest.mtimeMs) newest = { path, mtimeMs };
     } catch {}
   }
-  if (!newest) return null;
-  return JSON.parse(await readFile(newest.path, "utf8"));
+  return newest?.path ?? null;
+}
+
+async function readState() {
+  const path = await newestFile(STATE_FILES);
+  return path ? JSON.parse(await readFile(path, "utf8")) : null;
+}
+
+async function readProfiles() {
+  const path = await newestFile(PROFILE_FILES);
+  if (!path) return [];
+  try {
+    return JSON.parse(await readFile(path, "utf8")).map((p) => p.name);
+  } catch {
+    return [];
+  }
 }
 
 async function send(path, query = {}) {
@@ -104,9 +122,9 @@ server.registerTool(
   "list_spaces",
   {
     title: "List Spaces",
-    description: "List every macOS Space (desktop) with its number, name, display, apps and which one is active.",
+    description: "List every macOS Space (desktop) with its number, name, display, the apps that have windows there, its note, and which one is active.",
     inputSchema: {},
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   },
   guarded(async () => {
     if (!(await isRunning())) return fail(NOT_RUNNING);
@@ -115,7 +133,8 @@ server.registerTool(
     const lines = state.spaces.map((s) => {
       const label = s.isFullscreen ? "full screen" : `Desktop ${s.number ?? "?"}`;
       const apps = s.apps?.length ? ` — ${s.apps.join(", ")}` : "";
-      return `${s.isActive ? "*" : " "} ${label}: ${s.name}${apps}`;
+      const note = s.note ? ` (note: ${s.note})` : "";
+      return `${s.isActive ? "*" : " "} ${label}: ${s.name}${apps}${note}`;
     });
     const displays = new Set(state.spaces.map((s) => s.display)).size;
     return {
@@ -133,7 +152,7 @@ server.registerTool(
     title: "Current Space",
     description: "Name and number of the Space you are on.",
     inputSchema: {},
-    annotations: { readOnlyHint: true },
+    annotations: { readOnlyHint: true, openWorldHint: false },
   },
   guarded(async () => {
     if (!(await isRunning())) return fail(NOT_RUNNING);
@@ -150,6 +169,7 @@ server.registerTool(
     title: "Switch Space",
     description: "Switch to a Space by desktop number or name. Use \"next\", \"previous\" or \"back\" to step.",
     inputSchema: { space: spaceArg },
+    annotations: { openWorldHint: false },
   },
   guarded(async ({ space }) => {
     const before = (await readState())?.current;
@@ -175,8 +195,11 @@ server.registerTool(
     title: "Move window to Space",
     description:
       "Send the frontmost window to another Space (by number or name, or \"next\"/\"previous\"). " +
-      "Note: moving windows needs macOS 14.0-14.4 or 26.4+, a macOS limit.",
+      "On macOS 14.0-14.4 and 26.4+ the window moves directly; on other versions Spacepal drags it, " +
+      "which takes a moment longer. The frontmost window is usually the one the user worked in last, " +
+      "not the MCP client's own window when it runs in a terminal.",
     inputSchema: { space: spaceArg },
+    annotations: { openWorldHint: false },
   },
   guarded(async ({ space }) => {
     const s = String(space).toLowerCase();
@@ -199,6 +222,7 @@ server.registerTool(
       space: spaceArg.optional(),
       name: z.string().max(60).describe("New name. Empty text restores \"Desktop N\"."),
     },
+    annotations: { openWorldHint: false },
   },
   guarded(async ({ space, name }) => {
     if (space !== undefined && !(await findSpace(space))) return fail(`No Space called "${space}".`);
@@ -214,10 +238,11 @@ server.registerTool(
     title: "Open overview",
     description: "Open Spacepal's overview grid of all Spaces on screen.",
     inputSchema: {},
+    annotations: { openWorldHint: false },
   },
   guarded(async () => {
     await send("overview");
-    return text("Overview opened.");
+    return text("Asked Spacepal to open the overview. It opens if the trial is running or Spacepal is licensed; otherwise Spacepal shows its license window.");
   }),
 );
 
@@ -227,8 +252,10 @@ server.registerTool(
     title: "Set Space note",
     description: "Attach a short note to a Space (what it is for).",
     inputSchema: { space: spaceArg.optional(), text: z.string().max(500) },
+    annotations: { openWorldHint: false },
   },
   guarded(async ({ space, text: note }) => {
+    if (space !== undefined && !(await findSpace(space))) return fail(`No Space called "${space}".`);
     await send(`note/${ref(space)}`, { text: note });
     return text("Note saved.");
   }),
@@ -240,10 +267,178 @@ server.registerTool(
     title: "Apply profile",
     description: "Apply a saved Spacepal profile by name (names, layouts and rules).",
     inputSchema: { name: z.string().min(1) },
+    annotations: { openWorldHint: false },
   },
   guarded(async ({ name }) => {
-    await send(`profile/${encodeURIComponent(name)}`);
-    return text(`Applied profile "${name}".`);
+    const names = await readProfiles();
+    const match = names.find((n) => n.toLowerCase() === name.toLowerCase());
+    if (!match) {
+      return fail(names.length ? `No profile called "${name}". Profiles: ${names.join(", ")}.` : "No saved profiles yet. Save one in Spacepal Settings, Profiles.");
+    }
+    await send(`profile/${encodeURIComponent(match)}`);
+    return text(`Applied profile "${match}".`);
+  }),
+);
+
+server.registerTool(
+  "list_profiles",
+  {
+    title: "List profiles",
+    description: "Names of the saved Spacepal profiles (sets of Space names, colours, notes and automations).",
+    inputSchema: {},
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  },
+  guarded(async () => {
+    const names = await readProfiles();
+    return text(names.length ? names.join("\n") : "No saved profiles yet.");
+  }),
+);
+
+server.registerTool(
+  "apply_template",
+  {
+    title: "Apply template",
+    description:
+      `Name and colour the Spaces from a built-in starter template: ${TEMPLATES.join(", ")}. ` +
+      "This replaces the current Space names; the user can save them first as a profile.",
+    inputSchema: { name: z.enum(TEMPLATES) },
+    annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  guarded(async ({ name }) => {
+    await send(`template/${encodeURIComponent(name)}`);
+    await settle();
+    return text(`Applied the ${name} template.`);
+  }),
+);
+
+server.registerTool(
+  "set_up_space",
+  {
+    title: "Set up Space",
+    description: "Switch to a Space and run its automations now: open its apps, URLs and files, run its Shortcut or script.",
+    inputSchema: { space: spaceArg.optional() },
+    annotations: { openWorldHint: false },
+  },
+  guarded(async ({ space }) => {
+    const target = space === undefined ? null : await findSpace(space);
+    if (space !== undefined && !target) return fail(`No Space called "${space}".`);
+    await send(`setup/${ref(space)}`);
+    return text(`Setting up ${target?.name ?? "the current Space"}.`);
+  }),
+);
+
+server.registerTool(
+  "save_window_layout",
+  {
+    title: "Save window layout",
+    description: "Save which Space and position every window is in, for this display setup. Replaces the previous manual save.",
+    inputSchema: {},
+    annotations: { idempotentHint: true, openWorldHint: false },
+  },
+  guarded(async () => {
+    await send("save-layout");
+    return text("Saved the window layout.");
+  }),
+);
+
+server.registerTool(
+  "restore_window_layout",
+  {
+    title: "Restore window layout",
+    description:
+      "Put windows back on the Spaces and positions from the last saved layout for this display setup. " +
+      "Moving windows between Spaces needs macOS 14.0-14.4 or 26.4+.",
+    inputSchema: {},
+    annotations: { openWorldHint: false },
+  },
+  guarded(async () => {
+    await send("restore-layout");
+    return text("Asked Spacepal to restore the saved layout. It shows how many windows it moved.");
+  }),
+);
+
+server.registerTool(
+  "save_sessions",
+  {
+    title: "Save sessions",
+    description:
+      "Save the terminal sessions and Chrome windows on a Space (or on every Space with all=true), " +
+      "so Spacepal can reopen them after a restart. Needs the Spacepal trial or a license.",
+    inputSchema: {
+      space: spaceArg.optional(),
+      all: z.boolean().optional().describe("Save every Space instead of one."),
+    },
+    annotations: { idempotentHint: true, openWorldHint: false },
+  },
+  guarded(async ({ space, all }) => {
+    if (all) {
+      await send("session-save/all");
+      return text("Asked Spacepal to save sessions on every Space. It shows how many windows it saved.");
+    }
+    if (space !== undefined && !(await findSpace(space))) return fail(`No Space called "${space}".`);
+    await send(`session-save/${ref(space)}`);
+    return text("Asked Spacepal to save the sessions. It shows how many windows it saved.");
+  }),
+);
+
+server.registerTool(
+  "restore_sessions",
+  {
+    title: "Restore sessions",
+    description: "Reopen the saved terminal sessions and Chrome windows on their Spaces. Needs the Spacepal trial or a license.",
+    inputSchema: {},
+    annotations: { openWorldHint: false },
+  },
+  guarded(async () => {
+    await send("session-restore");
+    return text("Asked Spacepal to reopen the saved sessions.");
+  }),
+);
+
+server.registerTool(
+  "add_desktop",
+  {
+    title: "Add desktop",
+    description: "Add a new desktop (Space) on the current display.",
+    inputSchema: {},
+    annotations: { openWorldHint: false },
+  },
+  guarded(async () => {
+    const before = (await readState())?.spaces.length ?? 0;
+    await send("add-desktop");
+    const end = Date.now() + 4000;
+    while (Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 250));
+      const after = (await readState())?.spaces.length ?? 0;
+      if (after > before) return text(`Added a desktop. ${after} Spaces now.`);
+    }
+    return text("Asked Spacepal to add a desktop; it has not confirmed it yet.");
+  }),
+);
+
+server.registerTool(
+  "remove_desktop",
+  {
+    title: "Remove desktop",
+    description:
+      "Remove a desktop by number or name. Its windows move to another desktop, as when you close it in Mission Control. " +
+      "Full-screen Spaces cannot be removed this way. Ask the user before calling this.",
+    inputSchema: { space: spaceArg },
+    annotations: { destructiveHint: true, openWorldHint: false },
+  },
+  guarded(async ({ space }) => {
+    const target = await findSpace(space);
+    if (!target) return fail(`No Space called "${space}". Call list_spaces to see the names.`);
+    if (target.isFullscreen) return fail(`${target.name} is a full-screen Space. Leave full screen in that app instead.`);
+    const before = (await readState())?.spaces.length ?? 0;
+    await send(`remove-desktop/${ref(space)}`);
+    const end = Date.now() + 4000;
+    while (Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 250));
+      const after = (await readState())?.spaces.length ?? 0;
+      if (after < before) return text(`Removed ${target.name}. ${after} Spaces now.`);
+    }
+    return text(`Asked Spacepal to remove ${target.name}; it has not confirmed it yet.`);
   }),
 );
 
