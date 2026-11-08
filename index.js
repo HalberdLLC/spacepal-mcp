@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -26,6 +26,26 @@ const PROFILE_FILES = SUPPORT_DIRS.map((d) => join(d, "profiles.json"));
 const TEMPLATES = ["Developer", "Designer", "Freelancer", "Student", "Streamer"];
 
 const NOT_RUNNING = "Spacepal is not running. Open Spacepal (getspacepal.com) and try again.";
+const DOWNLOAD_URL = "https://getspacepal.com/download/?utm_source=mcp&utm_medium=tool&utm_campaign=not_installed";
+const NOT_INSTALLED =
+  "Spacepal is not installed on this Mac. This MCP server needs the Spacepal app, which names, previews and switches macOS Spaces. " +
+  `Download it from ${DOWNLOAD_URL} (14-day free trial, no account; names and switching stay free after the trial), open it once, then try again.`;
+
+// Not running and never installed reads differently: the user needs a download link, not "open it".
+async function notRunning() {
+  const places = [
+    "/Applications/Spacepal.app",
+    join(homedir(), "Applications/Spacepal.app"),
+    ...SUPPORT_DIRS,
+  ];
+  for (const p of places) {
+    try {
+      await stat(p);
+      return NOT_RUNNING;
+    } catch {}
+  }
+  return NOT_INSTALLED;
+}
 
 async function isRunning() {
   try {
@@ -63,7 +83,7 @@ async function readProfiles() {
 }
 
 async function send(path, query = {}) {
-  if (!(await isRunning())) throw new Error(NOT_RUNNING);
+  if (!(await isRunning())) throw new Error(await notRunning());
   // Encode with %20, not "+": the app reads query values with URLComponents, which keeps "+".
   const qs = Object.entries(query)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
@@ -119,7 +139,7 @@ Start with list_spaces to learn the Spaces, their numbers, names, notes and the 
 
 Tools that only read: list_spaces, current_space, list_profiles. Tools that change the user's screen or setup: everything else. Ask the user before remove_desktop, apply_template and apply_profile, which replace or remove things; rename_space and set_space_note are easy to undo by calling them again.
 
-Every action goes through Spacepal, so it must be running (macOS 14 or later). Nothing is sent over the network. If a tool says Spacepal is not running, tell the user to open it. The overview and sessions need Spacepal's trial or a license; names, notes and switching work in the free version.`;
+Every action goes through Spacepal, so it must be running (macOS 14 or later). Nothing is sent over the network. If a tool says Spacepal is not running, tell the user to open it. If it says Spacepal is not installed, give the user the download link from the message. The overview and sessions need Spacepal's trial or a license; names, notes and switching work in the free version.`;
 
 const server = new McpServer({ name: "spacepal", version: VERSION }, { instructions: INSTRUCTIONS });
 
@@ -162,7 +182,7 @@ server.registerTool(
     annotations: { title: "List Spaces", ...RO },
   },
   guarded(async () => {
-    if (!(await isRunning())) return fail(NOT_RUNNING);
+    if (!(await isRunning())) return fail(await notRunning());
     const state = await readState();
     if (!state) return fail("Spacepal has not written its Space list yet. Open the Spacepal menu once and try again.");
     const lines = state.spaces.map((s) => {
@@ -193,7 +213,7 @@ server.registerTool(
     annotations: { title: "Current Space", ...RO },
   },
   guarded(async () => {
-    if (!(await isRunning())) return fail(NOT_RUNNING);
+    if (!(await isRunning())) return fail(await notRunning());
     const state = await readState();
     if (!state) return fail("Spacepal has not written its Space list yet. Open the Spacepal menu once and try again.");
     const active = state.spaces.filter((s) => s.isActive);

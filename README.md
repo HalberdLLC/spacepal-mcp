@@ -12,7 +12,8 @@ It runs locally over stdio. It reads the Space list Spacepal writes to
 
 ## Requirements
 
-- macOS 14 or later, with Spacepal running (direct or Mac App Store build)
+- macOS 14 or later, with Spacepal running (direct or Mac App Store build).
+  [Download Spacepal](https://getspacepal.com/download/?utm_source=mcp-readme&utm_medium=readme): 14-day free trial, no account; names, notes and switching stay free after it.
 - Node.js 18 or later
 
 ## Tools
