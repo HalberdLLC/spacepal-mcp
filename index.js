@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -282,6 +282,97 @@ server.registerTool(
       await send(`move-window/${ref(space)}`);
     }
     return text(`Asked Spacepal to move the front window to ${space}.`);
+  }),
+);
+
+// Default browser's app path, via AppKit from JXA (no extra permission needed).
+async function defaultBrowser() {
+  try {
+    const { stdout } = await run("/usr/bin/osascript", [
+      "-l", "JavaScript", "-e",
+      "ObjC.import('AppKit'); $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL($.NSURL.URLWithString('https://example.com')).path.js",
+    ]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// Opens the link in a NEW window of the default browser, so it lands on the Space shown now
+// instead of in the browser window the user used last (which may be on another Space).
+async function openInNewWindow(url) {
+  const app = await defaultBrowser();
+  const name = app ? app.split("/").pop().replace(/\.app$/, "") : "";
+  if (/safari/i.test(name)) {
+    await run("/usr/bin/osascript", [
+      "-e", "on run argv",
+      "-e", `tell application "${name}" to make new document with properties {URL:item 1 of argv}`,
+      "-e", `tell application "${name}" to activate`,
+      "-e", "end run", url,
+    ]);
+  } else if (/firefox|zen|librewolf|floorp/i.test(name)) {
+    await run("/usr/bin/open", ["-na", app, "--args", "-new-window", url]);
+  } else if (app && /chrome|chromium|brave|edge|vivaldi|opera|arc|dia|comet|thorium/i.test(name)) {
+    await run("/usr/bin/open", ["-na", app, "--args", "--new-window", url]);
+  } else {
+    await run("/usr/bin/open", [url]);
+  }
+  return name || "the default browser";
+}
+
+server.registerTool(
+  "open_url",
+  {
+    title: "Open link on a Space",
+    description:
+      "Open a web link in a new window of the user's default browser, on the Space you choose or on the Space the user is on. " +
+      "Use it instead of the shell's open command: that adds a tab to the browser window used last, which may be on another Space, so the user cannot find it. " +
+      "With a space, Spacepal briefly shows that Space, opens the window there, then returns to the Space the user was on (stay=true keeps that Space on screen). " +
+      "Only http and https links. Fails if no Space has that name.",
+    inputSchema: {
+      url: z.string().min(1).describe('The link, e.g. "https://example.com". "example.com" is read as https.'),
+      space: optionalSpaceArg,
+      stay: z.boolean().optional().describe("Stay on that Space afterwards instead of returning. Default false."),
+    },
+    annotations: { title: "Open link on a Space", ...CHANGE, openWorldHint: true },
+  },
+  guarded(async ({ url, space, stay }) => {
+    let link = String(url).trim();
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(link)) link = `https://${link}`;
+    let parsed;
+    try {
+      parsed = new URL(link);
+    } catch {
+      return fail(`"${url}" is not a valid link.`);
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) return fail("Only http and https links can be opened.");
+    if (!(await isRunning())) return fail(await notRunning());
+
+    const state = await readState();
+    const origin = state?.spaces.find((s) => s.isActive);
+    const target = space === undefined ? null : await findSpace(space);
+    if (space !== undefined && !target) return fail(`No Space called "${space}". Call list_spaces to see the names.`);
+    if (target?.isFullscreen) return fail(`${target.name} is a full-screen app; pick a desktop.`);
+
+    const elsewhere = target && !target.isActive;
+    // Spacepal's "Keep with me" would otherwise bring the new window back to the Space the user returns to.
+    // Older Spacepal versions ignore this command.
+    if (elsewhere) await send("hold-windows/8");
+    if (elsewhere) {
+      await send(`switch/${ref(space)}`);
+      if (!(await waitForSwitch(state?.current))) return fail(`Could not switch to ${target.name}; the link was not opened.`);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    const browser = await openInNewWindow(parsed.href);
+    const where = target?.name ?? origin?.name ?? "the current Space";
+    if (elsewhere && !stay && origin) {
+      // Give the browser time to put its window on this Space before leaving it.
+      await new Promise((r) => setTimeout(r, 1800));
+      await send(`switch/${ref(origin.number ?? origin.name)}`);
+      await waitForSwitch(target.name);
+      return text(`Opened ${parsed.href} in a new ${browser} window on ${where}, then returned to ${origin.name}.`);
+    }
+    return text(`Opened ${parsed.href} in a new ${browser} window on ${where}.`);
   }),
 );
 

@@ -10,7 +10,7 @@ const client = new Client({ name: "smoke-test", version: "1.0.0" });
 await client.connect(new StdioClientTransport({ command: process.execPath, args: [server] }));
 
 const { tools } = await client.listTools();
-assert.equal(tools.length, 19, "expected 19 tools");
+assert.equal(tools.length, 20, "expected 20 tools");
 assert.ok(client.getInstructions()?.length > 100, "server instructions are missing");
 for (const tool of tools) {
   assert.ok(tool.description?.length >= 80, `${tool.name}: description too short`);
