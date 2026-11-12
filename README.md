@@ -24,6 +24,7 @@ It runs locally over stdio. It reads the Space list Spacepal writes to
 | `current_space` | The Space you are on |
 | `switch_space` | Switch by number or name, or step with `next`, `previous`, `back` |
 | `move_window_to_space` | Send the frontmost window to a Space by number or name, or to `next` or `previous` |
+| `open_url` | Open a link in a new browser window on a chosen Space (or the current one), so it does not land in a browser window on another Space |
 | `rename_space` | Name a Space; an empty name restores "Desktop N" |
 | `set_space_note` | Attach a short note to a Space |
 | `open_overview` | Open Spacepal's overview grid |
