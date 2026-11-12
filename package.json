@@ -31,7 +31,7 @@
   "homepage": "https://getspacepal.com/integrations/mcp/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TanKucukhas/spacepal-mcp.git"
+    "url": "git+https://github.com/HalberdLLC/spacepal-mcp.git"
   },
   "author": "Halberd LLC",
   "license": "MIT",
