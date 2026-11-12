@@ -21,6 +21,8 @@ const SUPPORT_DIRS = [
   join(homedir(), "Library/Containers/com.halberd.spacepal/Data/Library/Application Support/Spacepal"),
 ];
 const STATE_FILES = SUPPORT_DIRS.map((d) => join(d, "state.json"));
+// Per-Space settings, including the folders of the terminals that belong to each Space.
+const SPACE_FILES = SUPPORT_DIRS.map((d) => join(d, "spaces.json"));
 const PROFILE_FILES = SUPPORT_DIRS.map((d) => join(d, "profiles.json"));
 // Built into the app (Profiles.swift, SpaceTemplate.all()).
 const TEMPLATES = ["Developer", "Designer", "Freelancer", "Student", "Streamer"];
@@ -138,6 +140,8 @@ const INSTRUCTIONS = `Spacepal MCP server: work with macOS Spaces (desktops) thr
 Start with list_spaces to learn the Spaces, their numbers, names, notes and the apps on each; most tools take a Space by desktop number or by name from that list. Use current_space when you only need the active one.
 
 Tools that only read: list_spaces, current_space, list_profiles. Tools that change the user's screen or setup: everything else. Ask the user before remove_desktop, apply_template and apply_profile, which replace or remove things; rename_space and set_space_note are easy to undo by calling them again.
+
+To show the user a web page (docs, a pull request, a local dev server, a sign-in page), call open_url instead of running "open <url>" in a shell. A shell open puts the page in whichever browser window was used last, often on another Space where the user cannot find it. Leave open_url's space out and the page opens on this project's Space.
 
 Every action goes through Spacepal, so it must be running (macOS 14 or later). Nothing is sent over the network. If a tool says Spacepal is not running, tell the user to open it. If it says Spacepal is not installed, give the user the download link from the message. The overview and sessions need Spacepal's trial or a license; names, notes and switching work in the free version.`;
 
@@ -285,6 +289,37 @@ server.registerTool(
   }),
 );
 
+// The Space of the project this client works in: the one whose terminals run in this folder
+// (Spacepal records them), or whose note names it. A coding agent's MCP server starts in the
+// project folder; Claude Desktop starts it in "/", which matches nothing.
+async function projectSpace(state) {
+  const cwd = process.cwd();
+  if (!state || cwd === "/" || cwd === homedir()) return null;
+  let best = null;
+  let tie = false;
+  try {
+    const path = await newestFile(SPACE_FILES);
+    const meta = path ? JSON.parse(await readFile(path, "utf8")) : {};
+    for (const [id, entry] of Object.entries(meta)) {
+      for (const t of entry?.automation?.terminals ?? []) {
+        const folder = String(t.folder ?? "").replace(/\/+$/, "");
+        if (!folder || folder === homedir()) continue;
+        if (cwd !== folder && !cwd.startsWith(folder + "/")) continue;
+        if (!best || folder.length > best.len) { best = { id, len: folder.length }; tie = false; }
+        else if (folder.length === best.len && id !== best.id) tie = true;
+      }
+    }
+  } catch {}
+  if (best && !tie) {
+    const space = state.spaces.find((s) => s.id === best.id && !s.isFullscreen);
+    if (space) return space;
+  }
+  // Notes such as "Reddit Growth (~/workspace/reddit-growth)".
+  const short = cwd.replace(homedir(), "~");
+  const named = state.spaces.filter((s) => s.note && (s.note.includes(cwd) || s.note.includes(short)));
+  return named.length === 1 ? named[0] : null;
+}
+
 // Default browser's app path, via AppKit from JXA (no extra permission needed).
 async function defaultBrowser() {
   try {
@@ -325,13 +360,16 @@ server.registerTool(
   {
     title: "Open link on a Space",
     description:
-      "Open a web link in a new window of the user's default browser, on the Space you choose or on the Space the user is on. " +
+      "Open a web link in a new window of the user's default browser, on the Space you choose. " +
+      "Leave space out to open it on the Space of the project you are working in (the Space whose terminals run in your working folder), or on the user's current Space if none matches. " +
       "Use it instead of the shell's open command: that adds a tab to the browser window used last, which may be on another Space, so the user cannot find it. " +
       "With a space, Spacepal briefly shows that Space, opens the window there, then returns to the Space the user was on (stay=true keeps that Space on screen). " +
       "Only http and https links. Fails if no Space has that name.",
     inputSchema: {
       url: z.string().min(1).describe('The link, e.g. "https://example.com". "example.com" is read as https.'),
-      space: optionalSpaceArg,
+      space: spaceArg.optional().describe(
+        "Desktop number or name from list_spaces. Leave it out for this project's Space, or the current Space if Spacepal does not know the project.",
+      ),
       stay: z.boolean().optional().describe("Stay on that Space afterwards instead of returning. Default false."),
     },
     annotations: { title: "Open link on a Space", ...CHANGE, openWorldHint: true },
@@ -350,7 +388,7 @@ server.registerTool(
 
     const state = await readState();
     const origin = state?.spaces.find((s) => s.isActive);
-    const target = space === undefined ? null : await findSpace(space);
+    const target = space === undefined ? await projectSpace(state) : await findSpace(space);
     if (space !== undefined && !target) return fail(`No Space called "${space}". Call list_spaces to see the names.`);
     if (target?.isFullscreen) return fail(`${target.name} is a full-screen app; pick a desktop.`);
 
@@ -359,7 +397,7 @@ server.registerTool(
     // Older Spacepal versions ignore this command.
     if (elsewhere) await send("hold-windows/8");
     if (elsewhere) {
-      await send(`switch/${ref(space)}`);
+      await send(`switch/${ref(target.number ?? target.name)}`);
       if (!(await waitForSwitch(state?.current))) return fail(`Could not switch to ${target.name}; the link was not opened.`);
       await new Promise((r) => setTimeout(r, 300));
     }
