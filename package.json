@@ -1,6 +1,6 @@
 {
   "name": "spacepal-mcp",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "MCP server for Spacepal: list, switch, rename macOS Spaces and move windows between them from Claude, Cursor or any MCP client.",
   "mcpName": "com.getspacepal/spacepal",
   "type": "module",

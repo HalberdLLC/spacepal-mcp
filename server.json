@@ -3,13 +3,13 @@
   "name": "com.getspacepal/spacepal",
   "title": "Spacepal",
   "description": "List, switch and rename macOS Spaces and move windows between them. Needs the Spacepal app.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "websiteUrl": "https://getspacepal.com/integrations/mcp/",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "spacepal-mcp",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       }
