@@ -10,6 +10,18 @@ It runs locally over stdio. It reads the Space list Spacepal writes to
 `~/Library/Application Support/Spacepal/state.json` and sends commands through the
 `spacepal://` URL scheme. It makes no network calls.
 
+## Several Claude Code sessions
+
+If you run Claude Code on several Spaces, Spacepal 1.2.12 and later marks the Space whose session is
+waiting for you (a permission request or a question) or has finished, and `agent_sessions` lets an agent
+see the same thing, for example to check whether the backend session is done. Turn it on in Spacepal:
+Settings > General > Claude Code > Add to Claude Code. `list_spaces` also shows each project's git branch,
+changed files and local dev servers.
+
+![The Spacepal overview: two Spaces marked Waiting and one Done, with git branches and localhost servers (demo mode)](https://getspacepal.com/media/claude-waiting.gif)
+
+More: [Spacepal for Claude Code](https://getspacepal.com/use-cases/claude-code/)
+
 ## Requirements
 
 - macOS 14 or later, with Spacepal running (direct or Mac App Store build).
@@ -24,7 +36,9 @@ It runs locally over stdio. It reads the Space list Spacepal writes to
 | `current_space` | The Space you are on |
 | `switch_space` | Switch by number or name, or step with `next`, `previous`, `back` |
 | `move_window_to_space` | Send the frontmost window to a Space by number or name, or to `next` or `previous` |
-| `open_url` | Open a link in a new browser window on a chosen Space (or the current one), so it does not land in a browser window on another Space |
+| `open_url` | Open a link in a new browser window on a chosen Space, or on the project's own Space by default, so it does not land in a browser window on another Space |
+| `agent_sessions` | The Claude Code sessions by Space: which one is waiting for the user (and why), which finished, and since when |
+| `new_project_space` | Make a named Space for a project folder and start Claude Code there (direct version of Spacepal) |
 | `rename_space` | Name a Space; an empty name restores "Desktop N" |
 | `set_space_note` | Attach a short note to a Space |
 | `open_overview` | Open Spacepal's overview grid |
