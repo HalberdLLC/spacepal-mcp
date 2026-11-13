@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -168,6 +168,13 @@ const spaceEntry = z
     note: z.string().optional().describe("The user's note about what the Space is for"),
     color: z.string().optional().describe("Colour as #RRGGBB"),
     agent: z.enum(["waiting", "done"]).optional().describe("A coding agent (Claude Code) on this Space is waiting for the user, or has finished"),
+    agentMessage: z.string().optional().describe("Why the agent is waiting, e.g. \"Claude needs your permission to use Bash\""),
+    agentSince: z.string().optional().describe("When the agent started waiting or finished, ISO 8601"),
+    agentFolder: z.string().optional().describe("The agent's working folder"),
+    projectFolder: z.string().optional().describe("The project folder of the Space's terminals"),
+    branch: z.string().optional().describe("Git branch of the project folder"),
+    changes: z.number().int().optional().describe("Files changed in the project's git working tree"),
+    ports: z.array(z.number().int()).optional().describe("Local dev servers started from the project folder, e.g. 3000"),
   })
   .passthrough();
 
@@ -195,7 +202,8 @@ server.registerTool(
       const apps = s.apps?.length ? ` — ${s.apps.join(", ")}` : "";
       const note = s.note ? ` (note: ${s.note})` : "";
       const agent = s.agent === "waiting" ? " [Claude waiting for the user]" : s.agent === "done" ? " [Claude finished]" : "";
-      return `${s.isActive ? "*" : " "} ${label}: ${s.name}${agent}${apps}${note}`;
+      const git = s.branch ? ` {${s.branch}${s.changes ? `, ${s.changes} changed` : ""}${s.ports?.length ? `, localhost:${s.ports.join(", localhost:")}` : ""}}` : "";
+      return `${s.isActive ? "*" : " "} ${label}: ${s.name}${agent}${git}${apps}${note}`;
     });
     const displays = new Set(state.spaces.map((s) => s.display)).size;
     return {
@@ -363,6 +371,50 @@ server.registerTool(
       if (made) return text(`Made "${made.name}" (Desktop ${made.number ?? "?"}) for ${path}${command === "" ? "" : `, running ${command ?? "claude"}`}.`);
     }
     return text(`Asked Spacepal to set up a Space for ${path}. It may still be adding the desktop${before >= 16 ? "; macOS allows 16 desktops per display, so remove one if it cannot" : ""}.`);
+  }),
+);
+
+server.registerTool(
+  "agent_sessions",
+  {
+    title: "Coding agent sessions",
+    description:
+      "List the Claude Code sessions Spacepal knows on this Mac, one per Space: the project folder, whether the session is waiting for the user " +
+      "(and why, e.g. a permission request) or has finished its turn, and since when. Read-only. Use it to tell the user which other sessions need them, " +
+      "or to check whether another agent has finished before you continue. Waiting and finished states need Spacepal's Claude Code hooks " +
+      "(Spacepal Settings > General > Claude Code > Add to Claude Code); without them only the folders are listed.",
+    inputSchema: {},
+    annotations: { title: "Coding agent sessions", ...RO },
+  },
+  guarded(async () => {
+    if (!(await isRunning())) return fail(await notRunning());
+    const state = await readState();
+    if (!state) return fail("Spacepal has not written its Space list yet.");
+    let meta = {};
+    try {
+      const path = await newestFile(SPACE_FILES);
+      meta = path ? JSON.parse(await readFile(path, "utf8")) : {};
+    } catch {}
+    const ago = (iso) => {
+      const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+      return s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+    };
+    const rows = [];
+    for (const s of state.spaces) {
+      const claudeFolders = (meta[s.id]?.automation?.terminals ?? [])
+        .filter((t) => /\bclaude\b/.test(t.command ?? ""))
+        .map((t) => t.folder)
+        .sort((a, b) => b.length - a.length);
+      if (!s.agent && !claudeFolders.length) continue;
+      const folder = s.agentFolder ?? claudeFolders[0];
+      const status = s.agent === "waiting" ? `WAITING for the user${s.agentMessage ? `: ${s.agentMessage}` : ""} (${ago(s.agentSince)})`
+        : s.agent === "done" ? `finished (${ago(s.agentSince)})` : "no news (working, idle, or hooks not set up)";
+      rows.push(`${s.isActive ? "*" : " "} Desktop ${s.number ?? "?"} ${s.name} — ${folder?.replace(homedir(), "~") ?? "?"} — ${status}`);
+    }
+    const waiting = state.spaces.filter((s) => s.agent === "waiting").length;
+    return text(rows.length
+      ? `${waiting} waiting for the user (* = Space on screen)\n${rows.join("\n")}`
+      : "Spacepal knows no Claude Code sessions. Sessions show up after Spacepal saves the Space's terminals, or once its Claude Code hooks are added.");
   }),
 );
 
