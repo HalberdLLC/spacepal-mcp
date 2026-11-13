@@ -167,6 +167,7 @@ const spaceEntry = z
     apps: z.array(z.string()).describe("Apps with a window on this Space"),
     note: z.string().optional().describe("The user's note about what the Space is for"),
     color: z.string().optional().describe("Colour as #RRGGBB"),
+    agent: z.enum(["waiting", "done"]).optional().describe("A coding agent (Claude Code) on this Space is waiting for the user, or has finished"),
   })
   .passthrough();
 
@@ -193,7 +194,8 @@ server.registerTool(
       const label = s.isFullscreen ? "full screen" : `Desktop ${s.number ?? "?"}`;
       const apps = s.apps?.length ? ` — ${s.apps.join(", ")}` : "";
       const note = s.note ? ` (note: ${s.note})` : "";
-      return `${s.isActive ? "*" : " "} ${label}: ${s.name}${apps}${note}`;
+      const agent = s.agent === "waiting" ? " [Claude waiting for the user]" : s.agent === "done" ? " [Claude finished]" : "";
+      return `${s.isActive ? "*" : " "} ${label}: ${s.name}${agent}${apps}${note}`;
     });
     const displays = new Set(state.spaces.map((s) => s.display)).size;
     return {
@@ -293,32 +295,76 @@ server.registerTool(
 // (Spacepal records them), or whose note names it. A coding agent's MCP server starts in the
 // project folder; Claude Desktop starts it in "/", which matches nothing.
 async function projectSpace(state) {
-  const cwd = process.cwd();
-  if (!state || cwd === "/" || cwd === homedir()) return null;
-  let best = null;
-  let tie = false;
+  const cwd = process.cwd().replace(/\/+$/, "");
+  if (!state || cwd === "" || cwd === homedir()) return null;
+  const spaces = state.spaces.filter((s) => !s.isFullscreen);
+  let meta = {};
   try {
     const path = await newestFile(SPACE_FILES);
-    const meta = path ? JSON.parse(await readFile(path, "utf8")) : {};
-    for (const [id, entry] of Object.entries(meta)) {
-      for (const t of entry?.automation?.terminals ?? []) {
-        const folder = String(t.folder ?? "").replace(/\/+$/, "");
-        if (!folder || folder === homedir()) continue;
-        if (cwd !== folder && !cwd.startsWith(folder + "/")) continue;
-        if (!best || folder.length > best.len) { best = { id, len: folder.length }; tie = false; }
-        else if (folder.length === best.len && id !== best.id) tie = true;
-      }
-    }
+    meta = path ? JSON.parse(await readFile(path, "utf8")) : {};
   } catch {}
-  if (best && !tie) {
-    const space = state.spaces.find((s) => s.id === best.id && !s.isFullscreen);
-    if (space) return space;
-  }
-  // Notes such as "Reddit Growth (~/workspace/reddit-growth)".
+  const folders = (s) => (meta[s.id]?.automation?.terminals ?? []).map((t) => String(t.folder ?? "").replace(/\/+$/, ""));
+  // 1. A terminal on exactly this folder.
+  const exact = spaces.filter((s) => folders(s).includes(cwd));
+  if (exact.length === 1) return exact[0];
+  // 2. A note that names the folder.
   const short = cwd.replace(homedir(), "~");
-  const named = state.spaces.filter((s) => s.note && (s.note.includes(cwd) || s.note.includes(short)));
-  return named.length === 1 ? named[0] : null;
+  const named = spaces.filter((s) => s.note && (s.note.includes(cwd) || s.note.includes(short)));
+  if (named.length === 1) return named[0];
+  // 3. The deepest parent folder, if only one Space has it (~/workspace is on many).
+  let best = { spaces: [], len: 0 };
+  for (const s of spaces) {
+    for (const f of folders(s)) {
+      if (!f || f === homedir() || !cwd.startsWith(f + "/")) continue;
+      if (f.length > best.len) best = { spaces: [s], len: f.length };
+      else if (f.length === best.len && !best.spaces.includes(s)) best.spaces.push(s);
+    }
+  }
+  return best.spaces.length === 1 ? best.spaces[0] : null;
 }
+
+server.registerTool(
+  "new_project_space",
+  {
+    title: "New project Space",
+    description:
+      "Make a Space for a project folder: Spacepal adds a desktop (or uses an empty unnamed one when macOS has no room for more), " +
+      "names it after the folder, remembers the folder's terminal as that Space's, switches to it and opens a terminal there running a command (claude by default). " +
+      "Optionally opens a link (for example the dev server) in a new browser window on it. Changes the user's desktops, so ask first. " +
+      "Direct version of Spacepal only; fails if the folder does not exist.",
+    inputSchema: {
+      folder: z.string().min(1).describe('Absolute path of the project folder, or one starting with "~/". Leave it out to use your working folder.').optional(),
+      name: z.string().min(1).optional().describe("Name for the Space. Default: the folder's name."),
+      command: z.string().optional().describe('Run in the new terminal. Default "claude"; "" opens a plain shell.'),
+      url: z.string().optional().describe("A link to open on the new Space, e.g. http://localhost:3000"),
+    },
+    annotations: { title: "New project Space", ...CHANGE },
+  },
+  guarded(async ({ folder, name, command, url }) => {
+    const path = (folder ?? process.cwd()).replace(/^~(?=\/|$)/, homedir());
+    try {
+      if (!(await stat(path)).isDirectory()) return fail(`${path} is not a folder.`);
+    } catch {
+      return fail(`No folder at ${path}.`);
+    }
+    const query = { folder: path };
+    if (name) query.name = name;
+    if (command !== undefined) query.command = command === "" ? "none" : command;
+    if (url) query.url = url;
+    const before = (await readState())?.spaces.length ?? 0;
+    await send("new-project", query);
+    // Adding a desktop goes through Mission Control and takes a few seconds.
+    const end = Date.now() + 9000;
+    const want = (name ?? path.split("/").pop()).toLowerCase();
+    while (Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 400));
+      const state = await readState();
+      const made = state?.spaces.find((s) => s.name.toLowerCase() === want);
+      if (made) return text(`Made "${made.name}" (Desktop ${made.number ?? "?"}) for ${path}${command === "" ? "" : `, running ${command ?? "claude"}`}.`);
+    }
+    return text(`Asked Spacepal to set up a Space for ${path}. It may still be adding the desktop${before >= 16 ? "; macOS allows 16 desktops per display, so remove one if it cannot" : ""}.`);
+  }),
+);
 
 // Default browser's app path, via AppKit from JXA (no extra permission needed).
 async function defaultBrowser() {
