@@ -37,9 +37,11 @@ More: [Spacepal for Claude Code](https://getspacepal.com/use-cases/claude-code/)
 | `switch_space` | Switch by number or name, or step with `next`, `previous`, `back` |
 | `move_window_to_space` | Send the frontmost window to a Space by number or name, or to `next` or `previous` |
 | `open_url` | Open a link in a new browser window on a chosen Space, or on the project's own Space by default, so it does not land in a browser window on another Space |
+| `time_spent` | Hours and minutes spent on each Space today or over the last N days, per day if asked: "how long did I work on the API this week?" |
 | `agent_sessions` | The Claude Code sessions by Space: which one is waiting for the user (and why), which finished, and since when |
-| `new_project_space` | Make a named Space for a project folder and start Claude Code there (direct version of Spacepal) |
-| `rename_space` | Name a Space; an empty name restores "Desktop N" |
+| `inspect_project` | Read a project folder and suggest its desktop: name, note, icon, brand colour (from the logo or web manifest), dev server, git branch and open tasks |
+| `new_project_space` | Make a desktop for a project folder and start Claude Code there; name, icon, colour and note are worked out from the folder unless you give them (direct version of Spacepal) |
+| `rename_space` | Name a Space and give it an icon and a colour; an empty name restores "Desktop N" |
 | `set_space_note` | Attach a short note to a Space |
 | `open_overview` | Open Spacepal's overview grid |
 | `list_profiles` | Names of your saved profiles |
@@ -54,6 +56,14 @@ More: [Spacepal for Claude Code](https://getspacepal.com/use-cases/claude-code/)
 | `set_presentation_mode` | Hide Space names, notes and previews for a screen share, or show them again |
 | `add_desktop` | Add a desktop on the current display |
 | `remove_desktop` | Remove a desktop; its windows move to another one |
+| `tidy_report` | Every Chrome window with its tabs and Space, what each Space is for, and the tabs Spacepal finds on the wrong Space (direct version of Spacepal 1.2.15+) |
+| `tidy_up` | Move the tabs and windows Spacepal finds on the wrong Space to their own Space |
+| `move_tab` | Move one Chrome tab to a Space, or bring it to the one you are on; it keeps its history |
+| `move_browser_window` | Move a whole Chrome window to a Space without switching there |
+
+## Prompt
+
+`new_project` sets up a desktop for a project in one step: in Claude Code, type `/mcp__spacepal__new_project` (optionally with a folder). Claude inspects the folder, picks the name, icon, colour and note, makes the desktop and starts Claude Code there, then tells you what it chose.
 
 Every tool is marked with MCP hints, so clients can tell the read-only tools apart and ask
 before `remove_desktop` or `apply_template`, which change your setup.

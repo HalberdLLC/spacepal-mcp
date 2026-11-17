@@ -10,7 +10,7 @@ const client = new Client({ name: "smoke-test", version: "1.0.0" });
 await client.connect(new StdioClientTransport({ command: process.execPath, args: [server] }));
 
 const { tools } = await client.listTools();
-assert.equal(tools.length, 22, "expected 22 tools");
+assert.equal(tools.length, 24, "expected 24 tools");
 assert.ok(client.getInstructions()?.length > 100, "server instructions are missing");
 for (const tool of tools) {
   assert.ok(tool.description?.length >= 80, `${tool.name}: description too short`);
@@ -23,7 +23,11 @@ for (const tool of tools) {
   }
 }
 const readOnly = tools.filter((t) => t.annotations.readOnlyHint).map((t) => t.name).sort();
-assert.deepEqual(readOnly, ["agent_sessions", "current_space", "list_profiles", "list_spaces"]);
+assert.deepEqual(readOnly, ["agent_sessions", "current_space", "inspect_project", "list_profiles", "list_spaces", "time_spent"]);
+
+const { prompts } = await client.listPrompts();
+assert.deepEqual(prompts.map((p) => p.name), ["new_project"]);
+assert.match((await client.getPrompt({ name: "new_project", arguments: { folder: "~/code/x" } })).messages[0].content.text, /inspect_project/);
 
 await client.close();
 console.log(`ok: ${tools.length} tools`);

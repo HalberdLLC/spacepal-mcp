@@ -11,9 +11,10 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { inspectProject } from "./project.js";
 
 const run = promisify(execFile);
-const VERSION = "0.7.0";
+const VERSION = "0.9.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -24,6 +25,9 @@ const STATE_FILES = SUPPORT_DIRS.map((d) => join(d, "state.json"));
 // Per-Space settings, including the folders of the terminals that belong to each Space.
 const SPACE_FILES = SUPPORT_DIRS.map((d) => join(d, "spaces.json"));
 const PROFILE_FILES = SUPPORT_DIRS.map((d) => join(d, "profiles.json"));
+const STATS_FILES = SUPPORT_DIRS.map((d) => join(d, "stats.json"));
+// Browser windows, tabs and Tidy Up's suggestions; direct build only.
+const TIDY_FILES = SUPPORT_DIRS.map((d) => join(d, "tidy.json"));
 // Built into the app (Profiles.swift, SpaceTemplate.all()).
 const TEMPLATES = ["Developer", "Designer", "Freelancer", "Student", "Streamer"];
 
@@ -139,9 +143,13 @@ const INSTRUCTIONS = `Spacepal MCP server: work with macOS Spaces (desktops) thr
 
 Start with list_spaces to learn the Spaces, their numbers, names, notes and the apps on each; most tools take a Space by desktop number or by name from that list. Use current_space when you only need the active one.
 
-Tools that only read: list_spaces, current_space, list_profiles. Tools that change the user's screen or setup: everything else. Ask the user before remove_desktop, apply_template and apply_profile, which replace or remove things; rename_space and set_space_note are easy to undo by calling them again.
+Tools that only read: list_spaces, current_space, list_profiles, agent_sessions, time_spent, inspect_project.
+
+When the user wants a desktop for a project, call new_project_space: it works out the name, icon, colour and note from the folder by itself, so do not ask the user for them. Call inspect_project first if you want to check or improve its choices; rename_space changes them later. Tools that change the user's screen or setup: everything else. Ask the user before remove_desktop, apply_template and apply_profile, which replace or remove things; rename_space and set_space_note are easy to undo by calling them again.
 
 To show the user a web page (docs, a pull request, a local dev server, a sign-in page), call open_url instead of running "open <url>" in a shell. A shell open puts the page in whichever browser window was used last, often on another Space where the user cannot find it. Leave open_url's space out and the page opens on this project's Space.
+
+Browser tabs on the wrong Space: call tidy_report. It lists every Chrome window with its tabs and Space, what each Space is for (folder, repositories, dev server ports) and Spacepal's own suggestions. Spacepal's rule-based suggestions are safe to apply with tidy_up. For the tabs it leaves alone, judge from the addresses and the Space names, notes and folders, then use move_tab or move_browser_window; tell the user what you moved and why. Leave tabs alone when unsure, and never move tabs of sites people keep everywhere (chat assistants, mail, search). These tools are in the direct version of Spacepal only.
 
 Every action goes through Spacepal, so it must be running (macOS 14 or later). Nothing is sent over the network. If a tool says Spacepal is not running, tell the user to open it. If it says Spacepal is not installed, give the user the download link from the message. The overview and sessions need Spacepal's trial or a license; names, notes and switching work in the free version.`;
 
@@ -332,45 +340,118 @@ async function projectSpace(state) {
 }
 
 server.registerTool(
+  "inspect_project",
+  {
+    title: "Inspect project folder",
+    description:
+      "Read a project folder and suggest how its Spacepal desktop should look, so you do not have to ask the user: a display name (README title or folder), " +
+      "a one-line description for the Space note (package.json or README), an SF Symbol that fits the stack and topic, a brand colour (web manifest theme colour, " +
+      "theme-color meta tag, the SVG logo's main colour or a CSS brand variable) and where it came from, the logo file, the dev server command and URL, " +
+      "the git branch and remote, and open tasks (unchecked boxes in TODO.md or ROADMAP.md). Read-only and local; new_project_space uses it by itself.",
+    inputSchema: {
+      folder: z.string().min(1).optional().describe('Absolute path, or one starting with "~/". Leave it out to use your working folder.'),
+    },
+    annotations: { title: "Inspect project folder", ...RO },
+  },
+  guarded(async ({ folder }) => {
+    const info = await inspectProject((folder ?? process.cwd()).replace(/^~(?=\/|$)/, homedir()));
+    const lines = [
+      `Name: ${info.name}`,
+      `Note: ${info.description ?? "(none found)"}`,
+      `Icon: ${info.symbol}${info.stack.length ? ` (stack: ${info.stack.join(", ")})` : ""}`,
+      `Colour: ${info.color ? `${info.color} from ${info.color_from}` : "(none found; Spacepal picks one)"}`,
+      `Logo: ${info.logo ?? "(none found)"}`,
+      `Dev server: ${info.dev ? `${info.dev.command}${info.dev.url ? ` → ${info.dev.url}` : ""}` : "(none found)"}`,
+      `Git: ${info.git ? `${info.git.branch}${info.git.remote ? ` · ${info.git.remote}` : ""}` : "(not a git repository)"}`,
+      `Open tasks: ${info.tasks.length ? info.tasks.map((t) => `\n  - ${t.text} (${t.file})`).join("") : "(none found in TODO/ROADMAP files)"}`,
+    ];
+    return { content: [{ type: "text", text: lines.join("\n") }], structuredContent: info };
+  }),
+);
+
+server.registerTool(
   "new_project_space",
   {
     title: "New project Space",
     description:
       "Make a Space for a project folder: Spacepal adds a desktop (or uses an empty unnamed one when macOS has no room for more), " +
-      "names it after the folder, remembers the folder's terminal as that Space's, switches to it and opens a terminal there running a command (claude by default). " +
-      "Optionally opens a link (for example the dev server) in a new browser window on it. Changes the user's desktops, so ask first. " +
-      "Direct version of Spacepal only; fails if the folder does not exist.",
+      "names it, gives it an icon, a colour and a note, remembers the folder's terminal as that Space's, switches to it and opens a terminal there running a command (claude by default). " +
+      "Anything you leave out is filled in from the folder (see inspect_project): the README title, an SF Symbol for the stack, the brand colour from the logo or web manifest, " +
+      "and the package or README description as the note. Optionally opens a link (for example the dev server) in a new browser window on it. " +
+      "Changes the user's desktops, so ask first unless the user asked for it. Direct version of Spacepal only; fails if the folder does not exist.",
     inputSchema: {
       folder: z.string().min(1).describe('Absolute path of the project folder, or one starting with "~/". Leave it out to use your working folder.').optional(),
-      name: z.string().min(1).optional().describe("Name for the Space. Default: the folder's name."),
+      name: z.string().min(1).optional().describe("Name for the Space. Default: the README title, or the folder's name."),
       command: z.string().optional().describe('Run in the new terminal. Default "claude"; "" opens a plain shell.'),
-      url: z.string().optional().describe("A link to open on the new Space, e.g. http://localhost:3000"),
+      url: z.string().optional().describe("A link to open on the new Space, e.g. http://localhost:3000. Not opened unless given, since the dev server may not be running."),
+      symbol: z.string().max(80).optional().describe('SF Symbol for the icon, e.g. "hammer", "cart", "server.rack". Default: picked from the project; "" for none.'),
+      color: z.string().regex(/^(#?[0-9a-fA-F]{6})?$/).optional().describe('Colour as #RRGGBB. Default: the brand colour found in the project; "" for none.'),
+      note: z.string().max(500).optional().describe('Note for the Space. Default: the project description; "" for none.'),
     },
     annotations: { title: "New project Space", ...CHANGE },
   },
-  guarded(async ({ folder, name, command, url }) => {
+  guarded(async ({ folder, name, command, url, symbol, color, note }) => {
     const path = (folder ?? process.cwd()).replace(/^~(?=\/|$)/, homedir());
     try {
       if (!(await stat(path)).isDirectory()) return fail(`${path} is not a folder.`);
     } catch {
       return fail(`No folder at ${path}.`);
     }
-    const query = { folder: path };
-    if (name) query.name = name;
+    const info = await inspectProject(path).catch(() => null);
+    name ??= info?.name ?? path.split("/").pop();
+    symbol ??= info?.symbol;
+    color ??= info?.color ?? undefined;
+    note ??= info?.description ?? undefined;
+    const query = { folder: path, name };
     if (command !== undefined) query.command = command === "" ? "none" : command;
     if (url) query.url = url;
     const before = (await readState())?.spaces.length ?? 0;
     await send("new-project", query);
     // Adding a desktop goes through Mission Control and takes a few seconds.
     const end = Date.now() + 9000;
-    const want = (name ?? path.split("/").pop()).toLowerCase();
+    const want = name.toLowerCase();
     while (Date.now() < end) {
       await new Promise((r) => setTimeout(r, 400));
       const state = await readState();
       const made = state?.spaces.find((s) => s.name.toLowerCase() === want);
-      if (made) return text(`Made "${made.name}" (Desktop ${made.number ?? "?"}) for ${path}${command === "" ? "" : `, running ${command ?? "claude"}`}.`);
+      if (made) {
+        const style = {};
+        if (symbol) style.symbol = symbol;
+        if (color) style.color = color;
+        if (Object.keys(style).length) await send(`style/${ref(made.name)}`, style);
+        if (note) await send(`note/${ref(made.name)}`, { text: note });
+        const look = [symbol && `icon ${symbol}`, color && `colour ${color}`, note && "a note"].filter(Boolean).join(", ");
+        const extra = [
+          info?.dev && !url ? `Dev server: ${info.dev.command}${info.dev.url ? ` (${info.dev.url}); pass url to open it there` : ""}.` : "",
+          info?.tasks?.length ? `${info.tasks.length} open task(s) in ${[...new Set(info.tasks.map((t) => t.file))].join(", ")}.` : "",
+        ].filter(Boolean).join(" ");
+        return text(`Made "${made.name}" (Desktop ${made.number ?? "?"}) for ${path}${look ? ` with ${look}` : ""}${command === "" ? "" : `, running ${command ?? "claude"}`}.${extra ? " " + extra : ""}`);
+      }
     }
     return text(`Asked Spacepal to set up a Space for ${path}. It may still be adding the desktop${before >= 16 ? "; macOS allows 16 desktops per display, so remove one if it cannot" : ""}.`);
+  }),
+);
+
+server.registerPrompt(
+  "new_project",
+  {
+    title: "New project desktop",
+    description: "Set up a Spacepal desktop for a project: name, icon, colour, note and dev server worked out from the folder, Claude Code started there.",
+    argsSchema: { folder: z.string().optional().describe("Project folder. Leave empty for the current one.") },
+  },
+  ({ folder }) => ({
+    messages: [{
+      role: "user",
+      content: {
+        type: "text",
+        text: `Set up a Spacepal desktop for the project in ${folder ? folder : "this working folder"}.
+
+1. Call inspect_project${folder ? ` with folder "${folder}"` : ""}.
+2. Check what it found. If the icon does not fit what the project is about, pick a better SF Symbol. If no colour was found, choose one that suits the logo or the topic. Keep the note to one line.
+3. Call new_project_space with those values. I asked for it, so you do not need to ask me first. Do not pass url unless the dev server is already running.
+4. Tell me in a few lines what you made: name, icon, colour and where it came from, the note, the dev server command, and the open tasks if there are any.`,
+      },
+    }],
   }),
 );
 
@@ -513,24 +594,123 @@ server.registerTool(
 );
 
 server.registerTool(
+  "time_spent",
+  {
+    title: "Time spent per Space",
+    description:
+      "How long the user spent on each Space (desktop), from Spacepal's time tracking, for today or the last N days. " +
+      "Use it to answer \"how many hours did I work on this project this week\" or to copy hours into a time tracker or invoice. " +
+      "A Space stands for whatever the user keeps on it (a project, a client), so check its name and note with list_spaces. " +
+      "Time counts while the Space is on screen and the Mac is awake; it is stored only on this Mac. Read-only.",
+    inputSchema: {
+      days: z.number().int().min(1).max(366).optional().describe("1 = today only (default 7: today and the 6 days before)."),
+      space: spaceArg.optional().describe("Only this Space (desktop number or name). Leave out for every Space."),
+      by_day: z.boolean().optional().describe("Also list the minutes per day."),
+    },
+    outputSchema: {
+      days: z.number().int(),
+      from: z.string().describe("First day counted, yyyy-MM-dd"),
+      to: z.string().describe("Last day counted (today), yyyy-MM-dd"),
+      total_minutes: z.number().int(),
+      spaces: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        minutes: z.number().int(),
+        hours: z.number().describe("Minutes / 60, rounded to two decimals"),
+        per_day: z.record(z.string(), z.number().int()).optional().describe("yyyy-MM-dd -> minutes"),
+      })),
+    },
+    annotations: { title: "Time spent per Space", ...RO },
+  },
+  guarded(async ({ days = 7, space, by_day = false }) => {
+    const path = await newestFile(STATS_FILES);
+    if (!path) return fail("No time recorded yet. Time tracking is in Spacepal Settings > Time; it is on by default.");
+    const stats = JSON.parse(await readFile(path, "utf8"));
+    const state = await readState();
+    let meta = {};
+    try {
+      const mp = await newestFile(SPACE_FILES);
+      meta = mp ? JSON.parse(await readFile(mp, "utf8")) : {};
+    } catch {}
+    const nameOf = (id) => {
+      const live = state?.spaces.find((s) => s.id === id);
+      return live?.name ?? meta[id]?.name ?? "Removed Space";
+    };
+    let only = null;
+    if (space !== undefined) {
+      only = await findSpace(space);
+      if (!only) return fail(`No Space called "${space}".`);
+    }
+    // stats.json days are local calendar days, as Spacepal writes them.
+    const day = (offset) => {
+      const d = new Date();
+      d.setDate(d.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+    const totals = {};
+    for (let i = days - 1; i >= 0; i--) {
+      const key = day(i);
+      for (const [id, seconds] of Object.entries(stats[key] ?? {})) {
+        if (only && id !== only.id) continue;
+        const t = (totals[id] ??= { seconds: 0, perDay: {} });
+        t.seconds += seconds;
+        t.perDay[key] = Math.round(seconds / 60);
+      }
+    }
+    const spaces = Object.entries(totals)
+      .map(([id, t]) => ({
+        id,
+        name: nameOf(id),
+        minutes: Math.round(t.seconds / 60),
+        hours: Math.round((t.seconds / 3600) * 100) / 100,
+        ...(by_day ? { per_day: t.perDay } : {}),
+      }))
+      .filter((s) => s.minutes > 0)
+      .sort((a, b) => b.minutes - a.minutes);
+    const total = spaces.reduce((n, s) => n + s.minutes, 0);
+    const hm = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+    const period = days === 1 ? "today" : `the last ${days} days (${day(days - 1)} to ${day(0)})`;
+    const lines = spaces.map((s) => `${s.name}: ${hm(s.minutes)}${by_day ? Object.entries(s.per_day).filter(([, m]) => m > 0).map(([d, m]) => `\n  ${d}  ${hm(m)}`).join("") : ""}`);
+    const body = spaces.length ? `${lines.join("\n")}\nTotal: ${hm(total)}` : "No time recorded in that period.";
+    return {
+      content: [{ type: "text", text: `Time per Space, ${period}:\n${body}` }],
+      structuredContent: { days, from: day(days - 1), to: day(0), total_minutes: total, spaces },
+    };
+  }),
+);
+
+server.registerTool(
   "rename_space",
   {
     title: "Rename Space",
     description:
-      "Set the name Spacepal shows for a Space in its menu bar, overview and Mission Control. " +
-      "Replaces the old name; an empty name goes back to \"Desktop N\". The name stays with the Space even if desktops are reordered. " +
-      "Reversible: call again with the old name (get it from list_spaces first). Fails if the Space does not exist.",
+      "Set the name Spacepal shows for a Space in its menu bar, overview and Mission Control, and optionally its icon and colour. " +
+      "Replaces the old name; an empty name goes back to \"Desktop N\". Leave name out to change only the icon or colour. The name stays with the Space even if desktops are reordered. " +
+      "Reversible: call again with the old values (list_spaces shows name, symbol and color). Fails if the Space does not exist.",
     inputSchema: {
       space: optionalSpaceArg,
-      name: z.string().max(60).describe('New name, up to 60 characters. Empty text ("") restores the default "Desktop N".'),
+      name: z.string().max(60).optional().describe('New name, up to 60 characters. Empty text ("") restores the default "Desktop N". Leave out to keep the name.'),
+      symbol: z.string().max(80).optional().describe('SF Symbol name for the icon, e.g. "hammer", "briefcase", "film", "cart". Empty text removes the icon.'),
+      color: z.string().regex(/^(#?[0-9a-fA-F]{6})?$/).optional().describe('Colour as #RRGGBB, e.g. "#F59E0B". Empty text removes the colour.'),
     },
     annotations: { title: "Rename Space", ...CHANGE, idempotentHint: true },
   },
-  guarded(async ({ space, name }) => {
+  guarded(async ({ space, name, symbol, color }) => {
     if (space !== undefined && !(await findSpace(space))) return fail(`No Space called "${space}".`);
-    await send(`rename/${ref(space)}`, { name });
+    if (name === undefined && symbol === undefined && color === undefined) return fail("Give a name, a symbol or a color.");
+    if (name !== undefined) await send(`rename/${ref(space)}`, { name });
+    if (symbol !== undefined || color !== undefined) {
+      const query = {};
+      if (symbol !== undefined) query.symbol = symbol;
+      if (color !== undefined) query.color = color;
+      await send(`style/${ref(space)}`, query);
+    }
     await settle();
-    return text(name ? `Renamed to "${name}".` : "Name reset to default.");
+    const parts = [];
+    if (name !== undefined) parts.push(name ? `name "${name}"` : "default name");
+    if (symbol !== undefined) parts.push(symbol ? `icon ${symbol}` : "no icon");
+    if (color !== undefined) parts.push(color ? `colour ${color}` : "no colour");
+    return text(`Set ${parts.join(", ")}.`);
   }),
 );
 
@@ -820,6 +1000,137 @@ server.registerTool(
       if (after < before) return text(`Removed ${target.name}. ${after} Spaces now.`);
     }
     return text(`Asked Spacepal to remove ${target.name}; it has not confirmed it yet.`);
+  }),
+);
+
+async function readTidy() {
+  const path = await newestFile(TIDY_FILES);
+  return path ? JSON.parse(await readFile(path, "utf8")) : null;
+}
+
+// Asks Spacepal for a fresh scan and waits until tidy.json is rewritten.
+async function freshTidy(timeoutMs = 6000) {
+  const before = (await readTidy())?.updatedAt;
+  await send("tidy/scan");
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    await new Promise((r) => setTimeout(r, 250));
+    const t = await readTidy();
+    if (t && t.updatedAt !== before) return t;
+  }
+  return await readTidy();
+}
+
+const NO_TIDY =
+  "Spacepal has not written a tidy report. Tidy Up is in the direct version of Spacepal (getspacepal.com), needs permission to control Google Chrome (System Settings > Privacy & Security > Automation), and Chrome must be running.";
+
+server.registerTool(
+  "tidy_report",
+  {
+    title: "Tidy report: browser tabs per Space",
+    description:
+      "Scan now and list every Google Chrome window: the Space it is on, its tabs (addresses without query strings), and what each Space is for (name, project folder, repositories, dev server ports). " +
+      "Also returns Spacepal's own suggestions: windows and tabs that clearly belong on another Space, with the reason. " +
+      "Use it to decide what to move with tidy_up, move_tab or move_browser_window, or to bring a project's tabs to the Space the user is on. Changes nothing.",
+    inputSchema: {},
+    annotations: { title: "Tidy report", ...RO, idempotentHint: false },
+  },
+  guarded(async () => {
+    const t = await freshTidy();
+    if (!t) return fail(NO_TIDY);
+    const lines = [`Scanned ${t.updatedAt}. Browser: ${t.browser}.`, "", "Spaces:"];
+    for (const s of t.spaces ?? []) {
+      const bits = [s.folder && `folder ${s.folder}`, s.repos?.length && `repos ${s.repos.join(", ")}`, s.ports?.length && `ports ${s.ports.join(", ")}`].filter(Boolean);
+      lines.push(`- ${s.number ?? "?"} ${s.name}${s.isActive ? " (current)" : ""}${bits.length ? ": " + bits.join("; ") : ""}`);
+    }
+    lines.push("", "Windows:");
+    for (const w of t.windows ?? []) {
+      lines.push(`- window ${w.id} on ${w.spaceNumber ?? "?"} ${w.space ?? "?"}: "${w.title}"`);
+      for (const u of w.tabs) lines.push(`    ${u}`);
+    }
+    const sw = t.suggestions?.windows ?? [], st = t.suggestions?.tabs ?? [];
+    lines.push("", `Spacepal suggests: ${sw.length} windows, ${st.length} tabs.`);
+    for (const w of sw) lines.push(`- window ${w.id} "${w.title}" on ${w.space} -> ${w.to} (${w.reason})`);
+    for (const x of st) lines.push(`- tab ${x.url} on ${x.space} -> ${x.to} (${x.reason})`);
+    return { content: [{ type: "text", text: lines.join("\n") }], structuredContent: t };
+  }),
+);
+
+server.registerTool(
+  "tidy_up",
+  {
+    title: "Apply Tidy Up's suggestions",
+    description:
+      "Move every window and tab that Spacepal's tidy_report suggests to the Space it belongs on. Tabs go into a Chrome window on that Space (a new one if it has none) and keep their history. " +
+      "Only Spacepal's own rule-based suggestions; to move other tabs use move_tab.",
+    inputSchema: {},
+    annotations: { title: "Tidy up", ...CHANGE },
+  },
+  guarded(async () => {
+    const before = await freshTidy();
+    if (!before) return fail(NO_TIDY);
+    const n = (before.suggestions?.windows?.length ?? 0) + (before.suggestions?.tabs?.length ?? 0);
+    if (!n) return text("Nothing to tidy: every window and tab Spacepal can place is on its Space.");
+    await send("tidy");
+    await new Promise((r) => setTimeout(r, 2500));
+    const after = await freshTidy();
+    const left = (after?.suggestions?.windows?.length ?? 0) + (after?.suggestions?.tabs?.length ?? 0);
+    return text(`Moved ${n - left} of ${n}.${left ? ` ${left} could not be moved; see tidy_report.` : ""}`);
+  }),
+);
+
+server.registerTool(
+  "move_tab",
+  {
+    title: "Move a browser tab to a Space",
+    description:
+      "Move one Chrome tab, found by its address from tidy_report, into a Chrome window on another Space (a new window there if it has none). The tab keeps its history. " +
+      "Leave space out to bring the tab to the Space the user is on now. The address may be the start of the tab's address.",
+    inputSchema: {
+      url: z.string().url().describe("The tab's address as tidy_report lists it"),
+      space: optionalSpaceArg,
+    },
+    annotations: { title: "Move tab", ...CHANGE },
+  },
+  guarded(async ({ url, space }) => {
+    const q = { url };
+    if (space !== undefined && space !== null && space !== "") q.space = String(space);
+    // The same address is often open on more than one desktop: count where its copies are, before and after.
+    const where = (t) => (t?.windows ?? []).filter((w) => w.tabs.some((u) => u.startsWith(url)))
+      .map((w) => ({ id: w.id, label: `${w.spaceNumber ?? "?"} ${w.space}`, n: w.tabs.filter((u) => u.startsWith(url)).length }));
+    const before = where(await freshTidy());
+    await send("move-tab", q);
+    await new Promise((r) => setTimeout(r, 1500));
+    const after = where(await freshTidy());
+    const moved = after.find((a) => a.n > (before.find((b) => b.id === a.id)?.n ?? 0));
+    const list = after.map((a) => `window ${a.id} on ${a.label}${a.n > 1 ? ` (${a.n} tabs)` : ""}`).join("; ");
+    if (moved) return text(`Moved: the tab is now in window ${moved.id} on ${moved.label}.${after.length > 1 ? ` Copies of that address: ${list}.` : ""}`);
+    if (!before.length) return text("No open tab shows that address; check it with tidy_report.");
+    const target = space === undefined || space === null || space === "" ? null : String(space).toLowerCase();
+    const allThere = target && after.every((a) => a.label.toLowerCase().split(" ").includes(target) || a.label.toLowerCase().endsWith(target));
+    return text(allThere ? `Already there: ${list}.` : `Not moved: Spacepal could not move it. Tabs with that address: ${list}.`);
+  }),
+);
+
+server.registerTool(
+  "move_browser_window",
+  {
+    title: "Move a browser window to a Space",
+    description:
+      "Move a whole Chrome window, by its id from tidy_report, to another Space without switching there. Leave space out to bring it to the Space the user is on now.",
+    inputSchema: {
+      id: z.string().min(1).describe("The window id from tidy_report"),
+      space: optionalSpaceArg,
+    },
+    annotations: { title: "Move browser window", ...CHANGE },
+  },
+  guarded(async ({ id, space }) => {
+    const q = { id };
+    if (space !== undefined && space !== null && space !== "") q.space = String(space);
+    await send("move-browser-window", q);
+    await new Promise((r) => setTimeout(r, 1500));
+    const w = (await freshTidy())?.windows?.find((w) => w.id === id);
+    return text(w ? `Window ${id} is on ${w.spaceNumber ?? "?"} ${w.space}.` : "Asked Spacepal to move the window.");
   }),
 );
 

@@ -1,0 +1,40 @@
+# Publishes spacepal-mcp when a v* tag is pushed (Scripts/release-mcp.sh in the app repo pushes it).
+# npm: Trusted Publishing (OIDC). No npm token and no 2FA prompt; npmjs.com trusts this workflow file.
+# MCP Registry: com.getspacepal namespace, logged in with the domain key in the MCP_REGISTRY_KEY secret.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
+      - name: Tag matches package.json and server.json
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          s="v$(node -p "require('./server.json').version")"
+          test "$v" = "$GITHUB_REF_NAME" && test "$s" = "$GITHUB_REF_NAME"
+      # The package declares os: darwin; --force lets CI install it on Linux for the checks.
+      - run: npm ci --force
+      - run: node --check index.js && npm test
+      - run: npm publish --access public
+      - name: MCP Registry
+        env:
+          MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+        run: |
+          if [ -z "$MCP_REGISTRY_KEY" ]; then echo "MCP_REGISTRY_KEY not set: publish to the registry from the Mac (mcp-publisher publish)"; exit 0; fi
+          curl -fsSL https://github.com/modelcontextprotocol/registry/releases/download/v1.8.9/mcp-publisher_linux_amd64.tar.gz | tar xz mcp-publisher
+          # The registry checks that the npm version exists; give npm a moment.
+          for i in 1 2 3 4 5 6; do npm view "spacepal-mcp@${GITHUB_REF_NAME#v}" version >/dev/null 2>&1 && break; sleep 10; done
+          ./mcp-publisher login http --domain getspacepal.com --private-key "$MCP_REGISTRY_KEY"
+          ./mcp-publisher publish
