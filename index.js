@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { inspectProject } from "./project.js";
 
 const run = promisify(execFile);
-const VERSION = "0.9.0";
+const VERSION = "0.9.1";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [

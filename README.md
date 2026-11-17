@@ -85,6 +85,19 @@ license.
 claude mcp add spacepal -- npx -y spacepal-mcp
 ```
 
+Or install the Spacepal plugin, which adds this server, the `/spacepal:spacepal` skill (sets up the
+desktop you are on: name, icon, colour, note, tabs and windows moved where they belong) and the hooks
+that mark the desktop whose session is waiting for you, in one step:
+
+```sh
+claude plugin marketplace add HalberdLLC/spacepal-mcp
+claude plugin install spacepal@spacepal
+```
+
+If you already added the server with `claude mcp add`, remove it first (`claude mcp remove spacepal`) so
+the tools are not listed twice. The plugin's hooks stay quiet when Spacepal's own hooks are in
+`~/.claude/settings.json`.
+
 ### Claude Desktop
 
 Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart

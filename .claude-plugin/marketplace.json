@@ -1,0 +1,12 @@
+{
+  "name": "spacepal",
+  "description": "Spacepal for Claude Code on macOS",
+  "owner": { "name": "Halberd LLC", "url": "https://getspacepal.com" },
+  "plugins": [
+    {
+      "name": "spacepal",
+      "source": "./plugin",
+      "description": "Spacepal MCP server, the /spacepal skill and waiting-session hooks for Mac desktops"
+    }
+  ]
+}
