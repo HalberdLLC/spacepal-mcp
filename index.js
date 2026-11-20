@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { inspectProject } from "./project.js";
 
 const run = promisify(execFile);
-const VERSION = "0.10.0";
+const VERSION = "0.10.1";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -463,10 +463,10 @@ server.registerTool(
   {
     title: "Coding agent sessions",
     description:
-      "List the Claude Code sessions Spacepal knows on this Mac, one per Space: the project folder, whether the session is waiting for the user " +
+      "List the AI coding agent sessions (Claude Code, Codex, Gemini CLI) Spacepal knows on this Mac, one per Space: the agent, the project folder, whether the session is waiting for the user " +
       "(and why, e.g. a permission request) or has finished its turn, and since when. Read-only. Use it to tell the user which other sessions need them, " +
       "or to check whether another agent has finished before you continue. Waiting and finished states need Spacepal's Claude Code hooks " +
-      "(Spacepal Settings > General > Claude Code > Add to Claude Code); without them only the folders are listed.",
+      "(Spacepal Settings > General > AI coding agents > Add to Claude Code / Codex / Gemini CLI); without them only the folders are listed.",
     inputSchema: {},
     annotations: { title: "Coding agent sessions", ...RO },
   },
@@ -486,14 +486,15 @@ server.registerTool(
     const rows = [];
     for (const s of state.spaces) {
       const claudeFolders = (meta[s.id]?.automation?.terminals ?? [])
-        .filter((t) => /\bclaude\b/.test(t.command ?? ""))
+        .filter((t) => /\b(claude|codex|gemini)\b/.test(t.command ?? ""))
         .map((t) => t.folder)
         .sort((a, b) => b.length - a.length);
       if (!s.agent && !claudeFolders.length) continue;
       const folder = s.agentFolder ?? claudeFolders[0];
       const status = s.agent === "waiting" ? `WAITING for the user${s.agentMessage ? `: ${s.agentMessage}` : ""} (${ago(s.agentSince)})`
         : s.agent === "done" ? `finished (${ago(s.agentSince)})` : "no news (working, idle, or hooks not set up)";
-      rows.push(`${s.isActive ? "*" : " "} Desktop ${s.number ?? "?"} ${s.name} — ${folder?.replace(homedir(), "~") ?? "?"} — ${status}`);
+      const who = s.agentName ? `${s.agentName}: ` : "";
+      rows.push(`${s.isActive ? "*" : " "} Desktop ${s.number ?? "?"} ${s.name} — ${who}${folder?.replace(homedir(), "~") ?? "?"} — ${status}`);
     }
     const waiting = state.spaces.filter((s) => s.agent === "waiting").length;
     return text(rows.length

@@ -1,18 +1,25 @@
 ---
 name: spacepal
-description: Set up and tidy the macOS desktop (Space) the user is on with the Spacepal MCP server. Looks at what the desktop is for, names it and gives it an icon, colour and note, moves browser tabs and windows to the desktops they belong on, pulls this desktop's own tabs here, and opens what the project needs. Use when the user types /spacepal, or asks to "tidy this desktop", "set up this Space", "bring my tabs here", "masaüstünü toparla", "tidy all my desktops", "tüm masaüstlerini toparla".
+description: Set up and tidy the macOS desktop (Space) the user is on with the Spacepal MCP server. Looks at what the desktop is for, names it and gives it an icon, colour and note, moves browser tabs and windows to the desktops they belong on, pulls this desktop's own tabs here, and opens what the project needs. Use when the user types /spacepal or $spacepal, or asks to "tidy this desktop", "set up this Space", "bring my tabs here", "masaüstünü toparla", "tidy all my desktops", "tüm masaüstlerini toparla".
 ---
 
 # /spacepal: put this desktop in order
 
-Work on the desktop (Space) the user is on now, through the Spacepal MCP tools (`mcp__spacepal__*`, or `mcp__plugin_spacepal_spacepal__*` when Spacepal is installed as a Claude Code plugin). Arguments narrow the job: `/spacepal tidy` only tidies tabs and windows, `/spacepal name` only names and styles, `/spacepal here <project>` pulls a project's tabs here. `/spacepal all` tidies every desktop at once (section 6). With no argument do steps 1 to 5.
+Work on the desktop (Space) the user is on now, through the Spacepal MCP server's tools. This skill names them by their own names (`list_spaces`, `tidy_report`…); your app shows them with its own prefix, such as `mcp__spacepal__list_spaces` in Claude Code (`mcp__plugin_spacepal_spacepal__…` as a plugin), `spacepal.list_spaces` or `spacepal__list_spaces` elsewhere. Use whichever your app has.
 
-If the Spacepal tools are missing, tell the user to add the Spacepal MCP server with `claude mcp add -s user spacepal -- npx -y spacepal-mcp` and start a new session, then stop. If they say Spacepal is not running, say so in one line and stop. Tab and window tools are only in the direct version of Spacepal; if they fail, skip that step and say why.
+The same skill works in Claude Code (`/spacepal`), Codex (`$spacepal` or `/skills`), Gemini CLI, Cursor and GitHub Copilot (ask for it by name, or say "tidy this desktop"). Arguments narrow the job: `tidy` only tidies tabs and windows, `name` only names and styles, `here <project>` pulls a project's tabs here, `all` tidies every desktop at once (section 6). With no argument do steps 1 to 5.
+
+If the Spacepal tools are missing, tell the user how to add the server to the app they are using, then stop:
+- Claude Code: `claude mcp add -s user spacepal -- npx -y spacepal-mcp`
+- Codex: `codex mcp add spacepal -- npx -y spacepal-mcp`
+- Gemini CLI: `gemini mcp add -s user spacepal npx -y spacepal-mcp`
+- Cursor, GitHub Copilot and others: add a stdio server named `spacepal` with the command `npx -y spacepal-mcp` to the app's MCP settings.
+Then start a new session. If they say Spacepal is not running, say so in one line and stop. Tab and window tools are only in the direct version of Spacepal; if they fail, skip that step and say why.
 
 ## 1. Understand this desktop
 
 - `current_space` and `list_spaces`: this desktop's number, name, note, icon, apps; the other desktops' names and notes.
-- If the working folder or this desktop's project folder is a code project, `inspect_project` on it. `agent_sessions` shows Claude Code sessions here.
+- If the working folder or this desktop's project folder is a code project, `inspect_project` on it. `agent_sessions` shows the AI coding agent sessions (Claude Code, Codex, Gemini CLI) here.
 - `tidy_report`: every Chrome window with its tabs and desktop, plus what each desktop is for (folder, repositories, dev server ports).
 
 Decide in one sentence what this desktop is for (a project, a client, mail and chat, music...). Base it on the folder, the apps and the tabs actually here, not on guesses.
@@ -48,7 +55,7 @@ Answer in the user's language, short:
 - what you left alone and why, as suggestions the user can approve.
 Optionally one line from `time_spent` for this desktop today.
 
-## 6. `/spacepal all`: every desktop (Spacepal Pro)
+## 6. `all`: every desktop (Spacepal Pro)
 
 1. `tidy_all_report` (app windows on every desktop, with hints) and `tidy_report` (Chrome tabs). If `tidy_all_report` says it is part of Pro, say so in one line and stop.
 2. Decide for each window and tab which desktop it belongs on, from the desktops' names, notes and folders and the window titles and addresses. Follow Spacepal's hints: windows marked `fits` (including terminals) stay; `suggest` is a sure match. Anything that belongs to no desktop (general browsing, news, shopping, stray documents) goes to the desktop called "Inbox". Mail, chat or music go to a desktop named for them when there is one, otherwise to Inbox.
@@ -59,6 +66,7 @@ Optionally one line from `time_spent` for this desktop today.
 ## Rules
 
 - No deleting: never close tabs or windows, remove desktops, or apply profiles or templates from this skill.
-- Ask before moving more than 15 tabs at once; for `/spacepal all`, always show the plan and ask first.
+- Ask before moving more than 15 tabs at once; for `all`, always show the plan and ask first.
+- Some apps ask the user to approve each tool call; that is fine, keep the same order.
 - Addresses are private: do not repeat full URLs with tokens; the report already drops query strings.
 
