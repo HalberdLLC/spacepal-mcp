@@ -1,6 +1,6 @@
 {
   "name": "spacepal",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Spacepal for Claude Code: the Spacepal MCP server (name, style and switch Mac desktops, tidy tabs and windows, hours per desktop), the /spacepal skill that sets up the desktop you are on, and hooks that mark the desktop whose session is waiting for you. Needs the Spacepal app on macOS.",
   "author": {
     "name": "Halberd LLC",

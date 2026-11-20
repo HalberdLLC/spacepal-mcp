@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { inspectProject } from "./project.js";
 
 const run = promisify(execFile);
-const VERSION = "0.9.1";
+const VERSION = "0.10.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -28,6 +28,7 @@ const PROFILE_FILES = SUPPORT_DIRS.map((d) => join(d, "profiles.json"));
 const STATS_FILES = SUPPORT_DIRS.map((d) => join(d, "stats.json"));
 // Browser windows, tabs and Tidy Up's suggestions; direct build only.
 const TIDY_FILES = SUPPORT_DIRS.map((d) => join(d, "tidy.json"));
+const TIDY_ALL_FILES = SUPPORT_DIRS.map((d) => join(d, "tidy-all.json"));
 // Built into the app (Profiles.swift, SpaceTemplate.all()).
 const TEMPLATES = ["Developer", "Designer", "Freelancer", "Student", "Streamer"];
 
@@ -143,7 +144,7 @@ const INSTRUCTIONS = `Spacepal MCP server: work with macOS Spaces (desktops) thr
 
 Start with list_spaces to learn the Spaces, their numbers, names, notes and the apps on each; most tools take a Space by desktop number or by name from that list. Use current_space when you only need the active one.
 
-Tools that only read: list_spaces, current_space, list_profiles, agent_sessions, time_spent, inspect_project.
+Tools that only read: list_spaces, current_space, list_profiles, agent_sessions, time_spent, inspect_project, tidy_report, tidy_all_report.
 
 When the user wants a desktop for a project, call new_project_space: it works out the name, icon, colour and note from the folder by itself, so do not ask the user for them. Call inspect_project first if you want to check or improve its choices; rename_space changes them later. Tools that change the user's screen or setup: everything else. Ask the user before remove_desktop, apply_template and apply_profile, which replace or remove things; rename_space and set_space_note are easy to undo by calling them again.
 
@@ -151,7 +152,9 @@ To show the user a web page (docs, a pull request, a local dev server, a sign-in
 
 Browser tabs on the wrong Space: call tidy_report. It lists every Chrome window with its tabs and Space, what each Space is for (folder, repositories, dev server ports) and Spacepal's own suggestions. Spacepal's rule-based suggestions are safe to apply with tidy_up. For the tabs it leaves alone, judge from the addresses and the Space names, notes and folders, then use move_tab or move_browser_window; tell the user what you moved and why. Leave tabs alone when unsure, and never move tabs of sites people keep everywhere (chat assistants, mail, search). These tools are in the direct version of Spacepal only.
 
-Every action goes through Spacepal, so it must be running (macOS 14 or later). Nothing is sent over the network. If a tool says Spacepal is not running, tell the user to open it. If it says Spacepal is not installed, give the user the download link from the message. The overview and sessions need Spacepal's trial or a license; names, notes and switching work in the free version.`;
+To tidy every desktop at once (Spacepal Pro): call tidy_all_report for app windows and tidy_report for Chrome tabs, decide where each belongs, send things that belong to no desktop to the desktop called "Inbox", show the user the plan grouped by destination and ask before moving anything. Then move with move_app_window, move_tab and move_browser_window. Leave terminals and windows the report marks as fitting where they are.
+
+Every action goes through Spacepal, so it must be running (macOS 14 or later). Nothing is sent over the network. If a tool says Spacepal is not running, tell the user to open it. If it says Spacepal is not installed, give the user the download link from the message. The overview, sessions and tidying every desktop need Spacepal Pro (on for the first 14 days); names, notes, switching and window tools are free.`;
 
 const server = new McpServer({ name: "spacepal", version: VERSION }, { instructions: INSTRUCTIONS });
 
@@ -1131,6 +1134,67 @@ server.registerTool(
     await new Promise((r) => setTimeout(r, 1500));
     const w = (await freshTidy())?.windows?.find((w) => w.id === id);
     return text(w ? `Window ${id} is on ${w.spaceNumber ?? "?"} ${w.space}.` : "Asked Spacepal to move the window.");
+  }),
+);
+
+async function freshTidyAll(timeoutMs = 6000) {
+  const read = async () => { const p = await newestFile(TIDY_ALL_FILES); return p ? JSON.parse(await readFile(p, "utf8")) : null; };
+  const before = (await read())?.updatedAt;
+  await send("tidy/all-report");
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    await new Promise((r) => setTimeout(r, 250));
+    const t = await read();
+    if (t && t.updatedAt !== before) return t;
+  }
+  return null;
+}
+
+const NOT_PRO = "Tidying every desktop is part of Spacepal Pro. Spacepal opened its Pro offer; Pro is on free for the first 14 days.";
+
+server.registerTool(
+  "tidy_all_report",
+  {
+    title: "Every app window on every desktop",
+    description:
+      "Global Tidy (Spacepal Pro, direct version): list every app window on every desktop with its id, app, title and desktop, what each desktop is for (name, note, project folder), and Spacepal's rule-based hints (suggest: a desktop the title names; fits: leave it). " +
+      "Chrome tabs are not in this list; use tidy_report for them. To tidy everything: call this and tidy_report, decide which desktop each window and tab belongs on, put anything that belongs to no desktop on the desktop called \"Inbox\" (move_app_window makes it when missing), show the user the plan, and only then move with move_app_window, move_tab and move_browser_window. Leave terminals and windows marked fits where they are. Changes nothing.",
+    inputSchema: {},
+    annotations: { title: "Tidy all report", ...RO, idempotentHint: false },
+  },
+  guarded(async () => {
+    if (!(await isRunning())) return fail(await notRunning());
+    const t = await freshTidyAll();
+    if (!t) return fail("Spacepal did not answer. Global Tidy is in the direct version of Spacepal 1.2.18 and later (getspacepal.com).");
+    if (!t.pro) return fail(NOT_PRO);
+    const lines = [`Scanned ${t.updatedAt}.${t.movesBackgroundWindows ? "" : " On this macOS only the front window can be moved; other app windows stay where they are."}`, "", "Desktops:"];
+    for (const s of t.spaces ?? []) lines.push(`- ${s.number ?? "?"} ${s.name}${s.isActive ? " (current)" : ""}${s.folder ? `: folder ${s.folder}` : ""}${s.note ? ` (note: ${s.note})` : ""}`);
+    lines.push("", "App windows:");
+    for (const w of t.windows ?? []) lines.push(`- ${w.id} ${w.app}: "${w.title}" on ${w.space}${w.suggest ? ` -> suggest ${w.suggest} (${w.reason})` : w.fits ? " (fits, leave it)" : ""}`);
+    return { content: [{ type: "text", text: lines.join("\n") }], structuredContent: t };
+  }),
+);
+
+server.registerTool(
+  "move_app_window",
+  {
+    title: "Move an app window to a desktop",
+    description:
+      "Global Tidy (Spacepal Pro): move one app window, by its id from tidy_all_report, to a desktop by name without switching there. Use \"Inbox\" for things that belong to no desktop; Spacepal adds and names that desktop when it is missing. The user can undo it from the menu for five minutes.",
+    inputSchema: {
+      id: z.number().int().positive().describe("The window id from tidy_all_report"),
+      space: z.string().min(1).describe('The desktop name, e.g. "API" or "Inbox"'),
+    },
+    annotations: { title: "Move app window", ...CHANGE },
+  },
+  guarded(async ({ id, space }) => {
+    if (!(await isRunning())) return fail(await notRunning());
+    await send("move-app-window", { id: String(id), space: String(space) });
+    await new Promise((r) => setTimeout(r, 1500));
+    const t = await freshTidyAll();
+    if (t && !t.pro) return fail(NOT_PRO);
+    const w = t?.windows?.find((w) => w.id === id);
+    return text(w ? `Window ${id} (${w.app}) is on ${w.space}.` : "Asked Spacepal to move the window.");
   }),
 );
 

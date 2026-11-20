@@ -1,11 +1,11 @@
 ---
 name: spacepal
-description: Set up and tidy the macOS desktop (Space) the user is on with the Spacepal MCP server. Looks at what the desktop is for, names it and gives it an icon, colour and note, moves browser tabs and windows to the desktops they belong on, pulls this desktop's own tabs here, and opens what the project needs. Use when the user types /spacepal, or asks to "tidy this desktop", "set up this Space", "bring my tabs here", "masaüstünü toparla".
+description: Set up and tidy the macOS desktop (Space) the user is on with the Spacepal MCP server. Looks at what the desktop is for, names it and gives it an icon, colour and note, moves browser tabs and windows to the desktops they belong on, pulls this desktop's own tabs here, and opens what the project needs. Use when the user types /spacepal, or asks to "tidy this desktop", "set up this Space", "bring my tabs here", "masaüstünü toparla", "tidy all my desktops", "tüm masaüstlerini toparla".
 ---
 
 # /spacepal: put this desktop in order
 
-Work on the desktop (Space) the user is on now, through the Spacepal MCP tools (`mcp__spacepal__*`, or `mcp__plugin_spacepal_spacepal__*` when Spacepal is installed as a Claude Code plugin). Arguments narrow the job: `/spacepal tidy` only tidies tabs and windows, `/spacepal name` only names and styles, `/spacepal here <project>` pulls a project's tabs here. With no argument do all steps.
+Work on the desktop (Space) the user is on now, through the Spacepal MCP tools (`mcp__spacepal__*`, or `mcp__plugin_spacepal_spacepal__*` when Spacepal is installed as a Claude Code plugin). Arguments narrow the job: `/spacepal tidy` only tidies tabs and windows, `/spacepal name` only names and styles, `/spacepal here <project>` pulls a project's tabs here. `/spacepal all` tidies every desktop at once (section 6). With no argument do steps 1 to 5.
 
 If the Spacepal tools are missing, tell the user to add the Spacepal MCP server with `claude mcp add -s user spacepal -- npx -y spacepal-mcp` and start a new session, then stop. If they say Spacepal is not running, say so in one line and stop. Tab and window tools are only in the direct version of Spacepal; if they fail, skip that step and say why.
 
@@ -48,9 +48,17 @@ Answer in the user's language, short:
 - what you left alone and why, as suggestions the user can approve.
 Optionally one line from `time_spent` for this desktop today.
 
+## 6. `/spacepal all`: every desktop (Spacepal Pro)
+
+1. `tidy_all_report` (app windows on every desktop, with hints) and `tidy_report` (Chrome tabs). If `tidy_all_report` says it is part of Pro, say so in one line and stop.
+2. Decide for each window and tab which desktop it belongs on, from the desktops' names, notes and folders and the window titles and addresses. Follow Spacepal's hints: windows marked `fits` (including terminals) stay; `suggest` is a sure match. Anything that belongs to no desktop (general browsing, news, shopping, stray documents) goes to the desktop called "Inbox". Mail, chat or music go to a desktop named for them when there is one, otherwise to Inbox.
+3. Show the plan first, grouped by destination ("→ API: 4 windows, 6 tabs"), with one line per item and the reason. Ask before moving anything.
+4. After the user agrees: `tidy_up` for Spacepal's own tab suggestions, then `move_tab` / `move_browser_window` for tabs and Chrome windows and `move_app_window` for other windows. `move_app_window` with "Inbox" adds that desktop when it is missing.
+5. Report what moved and what could not (on some macOS versions only the front window moves). The user can undo the last run from the menu (Undo Tidy Up) for five minutes.
+
 ## Rules
 
 - No deleting: never close tabs or windows, remove desktops, or apply profiles or templates from this skill.
-- Ask before moving more than 15 tabs at once.
+- Ask before moving more than 15 tabs at once; for `/spacepal all`, always show the plan and ask first.
 - Addresses are private: do not repeat full URLs with tokens; the report already drops query strings.
 
