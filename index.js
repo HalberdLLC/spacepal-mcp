@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { inspectProject } from "./project.js";
 
 const run = promisify(execFile);
-const VERSION = "0.10.1";
+const VERSION = "0.11.0";
 
 // Direct build writes to Application Support; the App Store build is sandboxed.
 const SUPPORT_DIRS = [
@@ -926,8 +926,8 @@ server.registerTool(
       "Use move_window_to_space to send a window to another Space instead. Needs Spacepal 1.2.8 or later.",
     inputSchema: {
       position: z
-        .enum(["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right", "maximize", "center", "next-display"])
-        .describe('Where the window goes: a half ("left", "right", "top", "bottom"), a quarter ("top-left" etc.), "maximize", "center", or "next-display".'),
+        .enum(["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right", "maximize", "center", "left-third", "center-third", "right-third", "left-two-thirds", "right-two-thirds", "next-display"])
+        .describe('Where the window goes: a half ("left", "right", "top", "bottom"), a quarter ("top-left" etc.), a third ("left-third", "center-third", "right-third"), two thirds ("left-two-thirds", "right-two-thirds"), "maximize", "center", or "next-display". Thirds need Spacepal 1.2.21 or later.'),
     },
     annotations: { title: "Place window", ...CHANGE, idempotentHint: true },
   },
